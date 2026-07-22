@@ -193,19 +193,19 @@
     .size-card .num{font-size:32px;}
   }
   @media (max-width:480px){
-    .wrap{padding:16px 12px 48px;}
-    .hero{padding:8px 0 2px;}
-    .hero .cup{font-size:38px;}
-    .hero h1{font-size:20px; letter-spacing:1px; margin:6px 0 3px;}
-    .hero h1 .en{font-size:10px; letter-spacing:3px; margin-bottom:4px;}
-    .hero p{font-size:12px; line-height:1.5;}
-    .size-grid{gap:10px; margin:14px auto 0;}
-    .size-card{padding:12px 6px 10px; border-radius:12px; border-width:1.5px;}
-    .size-card .num{font-size:26px;}
-    .size-card .lbl{font-size:11px; margin-top:3px;}
-    .size-card .rounds{font-size:9px; margin-top:4px; letter-spacing:0;}
+    .wrap{padding:12px 12px 40px;}
+    .hero{padding:4px 0 0;}
+    .hero .cup{font-size:34px;}
+    .hero h1{font-size:18px; letter-spacing:1px; margin:4px 0 2px;}
+    .hero h1 .en{font-size:9px; letter-spacing:3px; margin-bottom:3px;}
+    .hero p{font-size:11px; line-height:1.4;}
+    .size-grid{gap:8px; margin:10px auto 0;}
+    .size-card{padding:10px 6px 8px; border-radius:12px; border-width:1.5px;}
+    .size-card .num{font-size:24px;}
+    .size-card .lbl{font-size:10px; margin-top:2px;}
+    .size-card .rounds{display:none;}
     .size-card.rec::after{font-size:7px; padding:2px 24px; top:5px; right:-28px;}
-    .note{font-size:11px; margin-top:14px; line-height:1.7;}
+    .note{display:none;}
     .topbar{gap:6px; margin-bottom:10px;}
     .round-tag{padding:5px 12px; font-size:12px;}
     .match-tag{font-size:12px;}
@@ -809,12 +809,16 @@ function renderBracketView(){
 }
 
 function exportBracket(){
-  // 导出时用 Canvas 高清渲染（与页面 DOM 对阵图内容一致）
-  bracketCanvas = drawBracket();
-  const a = document.createElement("a");
-  a.download = "披头士歌曲世界杯-对阵图-" + G.size + "强.png";
-  a.href = bracketCanvas.toDataURL("image/png");
-  a.click();
+  const btn = $("btn-export"), old = btn.textContent;
+  btn.textContent = "生成中…"; btn.disabled = true;
+  preloadCovers().then(()=>{
+    bracketCanvas = drawBracket();
+    const a = document.createElement("a");
+    a.download = "披头士歌曲世界杯-对阵图-" + G.size + "强.png";
+    a.href = bracketCanvas.toDataURL("image/png");
+    a.click();
+    btn.textContent = old; btn.disabled = false;
+  });
 }
 
 /* ---------------- 彩带 ---------------- */
@@ -860,7 +864,7 @@ $("btn-bracket").addEventListener("click", renderBracketView);
 $("btn-back-champ").addEventListener("click", ()=>show("champ"));
 $("btn-export").addEventListener("click", exportBracket);
 
-preloadCovers();
+// 封面按需加载：PK 页 <img> 自行加载，仅导出对阵图时预载全部
 </script>
 </body>
 </html>

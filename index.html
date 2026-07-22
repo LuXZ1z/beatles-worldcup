@@ -498,15 +498,15 @@ function buildBowl(){
     }
     const c = col.c, r = G.rounds[c];
     const n = size / Math.pow(2, c+1);
-    const hoff = (col.side==='top') ? 0 : Math.floor(r.matches.length/2);
+    const hoff = (col.side==='left') ? 0 : Math.floor(r.matches.length/2);
     col.songs = []; col.matches = [];
     for(let j=0; j<n; j++){
-      const m = r.matches[hoff + (c===0 ? Math.floor(j/2) : j)];
+      const m = r.matches[hoff + Math.floor(j/2)];
       let song;
       if(c===0) song = (j%2===0) ? m.a : m.b;
       else {
         const rp = G.rounds[c-1];
-        const hoffPrev = (col.side==='top') ? 0 : Math.floor(rp.matches.length/2);
+        const hoffPrev = (col.side==='left') ? 0 : Math.floor(rp.matches.length/2);
         song = rp.matches[hoffPrev + j].winner;
       }
       col.songs.push(song);

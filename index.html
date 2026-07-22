@@ -469,102 +469,160 @@ function showChampion(){
 }
 
 /* ---------------- 对阵图（Canvas 高清渲染） ---------------- */
-const BR = { rowH:64, colW:250, headH:96, padX:48, padBottom:56, cover:44 };
+const BR = { rowH:56, colW:200, headH:90, padX:40, padBottom:56, cover:40 };
 let bracketCanvas = null;
 
-function drawBracket(){
+function buildBowl(){
   const size = G.size;
-  const totalRounds = Math.log2(size);           // 例如 128 -> 7
-  const cols = totalRounds + 1;                  // 每列：参赛者名单；最后一列冠军
-  const W = BR.padX*2 + cols*BR.colW + 120;      // 给冠军列留出更宽的空间
-  const H = BR.headH + size*BR.rowH + BR.padBottom;
+  const T = Math.log2(size);
+  const half = size/2;
+  const colW = BR.colW, rowH = BR.rowH, headH = BR.headH, padX = BR.padX, slotW = BR.colW-14;
 
+  // 列描述：左(上半区) → 中心(决赛/冠军) → 右(下半区)
+  const cols = [];
+  for(let c=0; c<T-1; c++) cols.push({ side:'left', c });
+  cols.push({ side:'center' });
+  for(let c=T-2; c>=0; c--) cols.push({ side:'right', c });
+  cols.forEach((col, ci)=>{ col.x = padX + ci*colW; });
+
+  // 每列歌曲与对应比赛
+  cols.forEach(col=>{
+    if(col.side==='center'){
+      const sfTop = G.rounds[T-2].matches[0];
+      const sfBot = G.rounds[T-2].matches[1];
+      col.finalists = [ sfTop.winner, sfBot.winner ];
+      col.champion = G.champion;
+      col.songs = col.finalists;
+      col.matches = [ G.rounds[T-1].matches[0], G.rounds[T-1].matches[0] ];
+      return;
+    }
+    const c = col.c, r = G.rounds[c];
+    const n = size / Math.pow(2, c+1);
+    const hoff = (col.side==='top') ? 0 : Math.floor(r.matches.length/2);
+    col.songs = []; col.matches = [];
+    for(let j=0; j<n; j++){
+      const m = r.matches[hoff + (c===0 ? Math.floor(j/2) : j)];
+      let song;
+      if(c===0) song = (j%2===0) ? m.a : m.b;
+      else {
+        const rp = G.rounds[c-1];
+        const hoffPrev = (col.side==='top') ? 0 : Math.floor(rp.matches.length/2);
+        song = rp.matches[hoffPrev + j].winner;
+      }
+      col.songs.push(song);
+      col.matches.push(m);
+    }
+  });
+
+  // y 坐标：左列向中心收敛，右列镜像左列
+  const leftCols = cols.filter(c=>c.side==='left');
+  const rightCols = cols.filter(c=>c.side==='right');
+  const ySeed = i => headH + i*rowH + rowH/2;
+  leftCols.forEach((col, idx)=>{
+    col.y = [];
+    for(let j=0; j<col.songs.length; j++){
+      col.y[j] = (col.c===0) ? ySeed(j) : (leftCols[idx-1].y[2*j] + leftCols[idx-1].y[2*j+1])/2;
+    }
+  });
+  const centerCol = cols.find(c=>c.side==='center');
+  const lastLeft = leftCols[leftCols.length-1];
+  centerCol.y = [ (lastLeft.y[0] + lastLeft.y[1]) / 2 ];
+  rightCols.forEach((col, idx)=>{ col.y = leftCols[leftCols.length-1-idx].y.slice(); });
+
+  const W = padX*2 + cols.length*colW + 60;
+  const H = headH + half*rowH + BR.padBottom;
+  const centerX = centerCol.x + slotW/2;
+  return { cols, W, H, T, size, leftCols, rightCols, centerCol, centerX, centerY: centerCol.y[0], slotW };
+}
+
+function drawBracket(){
+  const b = buildBowl();
+  const { cols, W, H, leftCols, rightCols, centerCol, centerX, centerY, slotW } = b;
   const cv = document.createElement("canvas");
   cv.width = W; cv.height = H;
   const ctx = cv.getContext("2d");
 
-  // 背景
   ctx.fillStyle = "#fffdf7"; ctx.fillRect(0,0,W,H);
-  // 顶部装饰条
   for(let x=0;x<W;x+=48){ ctx.fillStyle="#b03a2e"; ctx.fillRect(x,0,24,8); ctx.fillStyle="#c9a227"; ctx.fillRect(x+24,0,24,8); }
 
-  // 标题
-  ctx.fillStyle = "#26221c";
+  ctx.fillStyle = "#26221c"; ctx.textAlign="center"; ctx.textBaseline="middle";
   ctx.font = "bold 30px Georgia, serif";
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText("🏆 The Beatles 歌曲世界杯 · 完整对阵图", W/2, 40);
-  ctx.font = "13px -apple-system, sans-serif";
-  ctx.fillStyle = "#6b6353";
-  ctx.fillText("共 "+size+" 首参赛 · 冠军："+G.champion.t+" · "+new Date().toLocaleDateString("zh-CN"), W/2, 66);
+  ctx.fillText("🏆 The Beatles 歌曲世界杯 · 完整对阵图", W/2, 38);
+  ctx.font = "13px -apple-system, sans-serif"; ctx.fillStyle="#6b6353";
+  ctx.fillText("共 "+b.size+" 首参赛 · 冠军："+G.champion.t+" · "+new Date().toLocaleDateString("zh-CN"), W/2, 62);
 
-  // 各列参与者：col 0 = 第一轮全部参赛者（按对阵顺序）
-  const colSongs = [];
-  const r0 = G.rounds[0];
-  const seeds = [];
-  r0.matches.forEach(mm=>{ seeds.push(mm.a); seeds.push(mm.b); });
-  colSongs.push(seeds);
-  for(let r=0;r<G.rounds.length;r++){
-    colSongs.push(G.rounds[r].matches.map(mm=>mm.winner));
-  }
-
-  // 计算每个槽位的 y
-  function yPos(col, idx){
-    if(col===0) return BR.headH + idx*BR.rowH + BR.rowH/2;
-    return (yPos(col-1, idx*2) + yPos(col-1, idx*2+1)) / 2;
-  }
-  function xPos(col){ return BR.padX + col*BR.colW; }
-
-  // 败者集合：col c 的 slot i 如果在下一轮对阵中落败，则灰显
-  function isLoser(col, idx){
-    if(col >= G.rounds.length) return false;         // 冠军列不存在败者
-    const song = colSongs[col][idx];
-    const match = G.rounds[col].matches[Math.floor(idx/2)];
-    return match.winner !== song;
-  }
-
-  // 连线（先画线，再画卡片）
+  // 连线
   ctx.strokeStyle = "#d8cdb4"; ctx.lineWidth = 1.5;
-  for(let c=1;c<colSongs.length;c++){
-    for(let i=0;i<colSongs[c].length;i++){
-      if(!colSongs[c][i]) continue;
-      const y = yPos(c,i);
-      const y1 = yPos(c-1, i*2), y2 = yPos(c-1, i*2+1);
-      const xEnd = xPos(c), xStart = xPos(c-1)+BR.colW-14;
-      const midX = (xStart+xEnd)/2;
+  function pairLines(outer, inner){
+    for(let j=0;j<inner.songs.length;j++){
+      const y=inner.y[j], y1=outer.y[2*j], y2=outer.y[2*j+1];
+      const xEnd=inner.x, xStart=outer.x+slotW, midX=(xStart+xEnd)/2;
       ctx.beginPath();
-      ctx.moveTo(xStart, y1); ctx.lineTo(midX, y1);
-      ctx.moveTo(xStart, y2); ctx.lineTo(midX, y2);
-      ctx.moveTo(midX, Math.min(y1,y2)); ctx.lineTo(midX, Math.max(y1,y2));
-      ctx.moveTo(midX, y); ctx.lineTo(xEnd, y);
+      ctx.moveTo(xStart,y1); ctx.lineTo(midX,y1);
+      ctx.moveTo(xStart,y2); ctx.lineTo(midX,y2);
+      ctx.moveTo(midX,Math.min(y1,y2)); ctx.lineTo(midX,Math.max(y1,y2));
+      ctx.moveTo(midX,y); ctx.lineTo(xEnd,y);
       ctx.stroke();
     }
   }
-
-  // 列标题
-  ctx.textAlign = "center";
-  for(let c=0;c<colSongs.length;c++){
-    const count = colSongs[c].length;
-    const label = c===colSongs.length-1 ? "🏆 冠军" : (count===2 ? "决赛" : count+" 强");
-    ctx.font = "bold 17px Georgia, serif";
-    ctx.fillStyle = "#b03a2e";
-    ctx.fillText(label, xPos(c)+(c===colSongs.length-1?60:(BR.colW-14)/2), 92);
-  }
-
-  // 画每个槽位
-  for(let c=0;c<colSongs.length;c++){
-    const isChampCol = c===colSongs.length-1;
-    for(let i=0;i<colSongs[c].length;i++){
-      const s = colSongs[c][i]; if(!s) continue;
-      const y = yPos(c,i);
-      if(isChampCol){
-        drawChampionBox(ctx, xPos(c), y, s);
-      } else {
-        drawSlot(ctx, xPos(c), y, s, isLoser(c,i), BR.colW-14);
-      }
+  for(let k=0;k<leftCols.length-1;k++) pairLines(leftCols[k], leftCols[k+1]);
+  function pairLinesR(outer, inner){
+    for(let j=0;j<inner.songs.length;j++){
+      const y=inner.y[j], y1=outer.y[2*j], y2=outer.y[2*j+1];
+      const xEnd=inner.x+slotW, xStart=outer.x, midX=(xStart+xEnd)/2;
+      ctx.beginPath();
+      ctx.moveTo(xStart,y1); ctx.lineTo(midX,y1);
+      ctx.moveTo(xStart,y2); ctx.lineTo(midX,y2);
+      ctx.moveTo(midX,Math.min(y1,y2)); ctx.lineTo(midX,Math.max(y1,y2));
+      ctx.moveTo(midX,y); ctx.lineTo(xEnd,y);
+      ctx.stroke();
     }
   }
+  for(let k=0;k<rightCols.length-1;k++) pairLinesR(rightCols[k+1], rightCols[k]);
+
+  const lastLeft = leftCols[leftCols.length-1];
+  const firstRight = rightCols[0];
+  const champL = centerX-100, champR = centerX+100;
+  function elbow(x1,y1,x2,gold){
+    ctx.strokeStyle = gold ? "#c9a227" : "#cfc6b2";
+    ctx.lineWidth = gold ? 2 : 1.2;
+    const midX=(x1+x2)/2;
+    ctx.beginPath();
+    ctx.moveTo(x1,y1); ctx.lineTo(midX,y1); ctx.lineTo(midX,centerY); ctx.lineTo(x2,centerY);
+    ctx.stroke();
+  }
+  lastLeft.songs.forEach((s,i)=> elbow(lastLeft.x+slotW, lastLeft.y[i], champL, s===centerCol.finalists[0]));
+  firstRight.songs.forEach((s,i)=> elbow(firstRight.x, firstRight.y[i], champR, s===centerCol.finalists[1]));
+
+  // 列标题
+  ctx.textAlign="center"; ctx.textBaseline="middle";
+  cols.forEach(col=>{
+    if(col.side==='center'){
+      ctx.font="bold 17px Georgia, serif"; ctx.fillStyle="#b03a2e";
+      ctx.fillText("🏆 决赛", centerX, 92);
+      return;
+    }
+    const label = roundName(b.size / Math.pow(2, col.c));
+    ctx.font="bold 15px Georgia, serif"; ctx.fillStyle="#b03a2e";
+    ctx.fillText(label, col.x+slotW/2, 92);
+  });
+
+  // 槽位
+  cols.forEach(col=>{
+    if(col.side==='center'){
+      drawChampionBox(ctx, centerX-110, centerY, centerCol.champion);
+      return;
+    }
+    col.songs.forEach((s,j)=>{
+      if(!s) return;
+      const m = col.matches[j];
+      const loser = m.winner && m.winner!==s;
+      drawSlot(ctx, col.x, col.y[j], s, loser, slotW);
+    });
+  });
   return cv;
 }
+
 
 function drawSlot(ctx, x, y, song, loser, w){
   const h = BR.rowH - 12, top = y - h/2;
@@ -670,84 +728,77 @@ function attachTip(el, song){
 }
 
 function renderBracketView(){
-  const size = G.size;
-  const totalRounds = Math.log2(size);
-  const cols = totalRounds + 1;
-  const W = BR.padX*2 + cols*BR.colW + 120;
-  const H = BR.headH + size*BR.rowH + BR.padBottom;
-
-  // 各列歌曲
-  const colSongs = [[]];
-  G.rounds[0].matches.forEach(mm=>{ colSongs[0].push(mm.a, mm.b); });
-  for(let r=0;r<G.rounds.length;r++) colSongs.push(G.rounds[r].matches.map(mm=>mm.winner));
-
-  function yPos(col, idx){
-    if(col===0) return BR.headH + idx*BR.rowH + BR.rowH/2;
-    return (yPos(col-1, idx*2) + yPos(col-1, idx*2+1)) / 2;
-  }
-  function xPos(col){ return BR.padX + col*BR.colW; }
-  function isLoser(col, idx){
-    if(col >= G.rounds.length) return false;
-    return G.rounds[col].matches[Math.floor(idx/2)].winner !== colSongs[col][idx];
-  }
+  const b = buildBowl();
+  const { cols, W, H, leftCols, rightCols, centerCol, centerX, centerY, slotW } = b;
 
   const inner = document.createElement("div");
   inner.className = "bracket-inner";
-  inner.style.width = W + "px"; inner.style.height = H + "px";
+  inner.style.width = W+"px"; inner.style.height = H+"px";
 
   let html = '<div class="b-title serif">🏆 The Beatles 歌曲世界杯 · 完整对阵图</div>' +
-    '<div class="b-sub">共 '+size+' 首参赛 · 冠军：'+G.champion.t+' · '+new Date().toLocaleDateString("zh-CN")+'</div>';
+    '<div class="b-sub">共 '+b.size+' 首参赛 · 冠军：'+G.champion.t+' · '+new Date().toLocaleDateString("zh-CN")+'</div>';
 
-  // SVG 连接线
-  html += '<svg width="'+W+'" height="'+H+'" style="position:absolute;left:0;top:0;pointer-events:none;">';
-  for(let c=1;c<colSongs.length;c++){
-    for(let i=0;i<colSongs[c].length;i++){
-      if(!colSongs[c][i]) continue;
-      const y=yPos(c,i), y1=yPos(c-1,i*2), y2=yPos(c-1,i*2+1);
-      const xEnd=xPos(c), xStart=xPos(c-1)+BR.colW-14;
+  // SVG 连线
+  let paths = "";
+  function pairSVG(outer, inner, rev){
+    for(let j=0;j<inner.songs.length;j++){
+      const y=inner.y[j], y1=outer.y[2*j], y2=outer.y[2*j+1];
+      const xEnd = rev ? inner.x+slotW : inner.x;
+      const xStart = rev ? outer.x : outer.x+slotW;
       const midX=(xStart+xEnd)/2;
-      html += '<path d="M'+xStart+' '+y1+' L'+midX+' '+y1+' M'+xStart+' '+y2+' L'+midX+' '+y2+
-              ' M'+midX+' '+Math.min(y1,y2)+' L'+midX+' '+Math.max(y1,y2)+
-              ' M'+midX+' '+y+' L'+xEnd+' '+y+'" stroke="#d8cdb4" stroke-width="1.5" fill="none"/>';
+      paths += '<path d="M'+xStart+' '+y1+' L'+midX+' '+y1+' M'+xStart+' '+y2+' L'+midX+' '+y2+
+        ' M'+midX+' '+Math.min(y1,y2)+' L'+midX+' '+Math.max(y1,y2)+
+        ' M'+midX+' '+y+' L'+xEnd+' '+y+'" stroke="#d8cdb4" stroke-width="1.5" fill="none"/>';
     }
   }
-  html += '</svg>';
+  for(let k=0;k<leftCols.length-1;k++) pairSVG(leftCols[k], leftCols[k+1], false);
+  for(let k=0;k<rightCols.length-1;k++) pairSVG(rightCols[k+1], rightCols[k], true);
+
+  const lastLeft = leftCols[leftCols.length-1];
+  const firstRight = rightCols[0];
+  const champL = centerX-100, champR = centerX+100;
+  function elbowSVG(x1,y1,x2,gold){
+    const midX=(x1+x2)/2;
+    paths += '<path d="M'+x1+' '+y1+' L'+midX+' '+y1+' L'+midX+' '+centerY+' L'+x2+' '+centerY+'" stroke="'+(gold?'#c9a227':'#cfc6b2')+'" stroke-width="'+(gold?'2':'1.2')+'" fill="none"/>';
+  }
+  lastLeft.songs.forEach((s,i)=> elbowSVG(lastLeft.x+slotW, lastLeft.y[i], champL, s===centerCol.finalists[0]));
+  firstRight.songs.forEach((s,i)=> elbowSVG(firstRight.x, firstRight.y[i], champR, s===centerCol.finalists[1]));
+
+  html += '<svg width="'+W+'" height="'+H+'" style="position:absolute;left:0;top:0;pointer-events:none;">'+paths+'</svg>';
   inner.innerHTML = html;
 
-  // 列标题 + 槽位
-  colSongs.forEach((list, c)=>{
-    const isChampCol = c===colSongs.length-1;
-    const count = list.length;
-    const label = isChampCol ? "🏆 冠军" : (count===2 ? "决赛" : count + " 强");
-    const hx = xPos(c) + (isChampCol ? 110 : (BR.colW-14)/2);
+  // 列标题
+  cols.forEach(col=>{
     const head = document.createElement("div");
     head.className = "b-colhead serif";
-    head.style.left = (hx-80) + "px";
-    head.textContent = label;
+    if(col.side==='center'){ head.textContent="🏆 决赛"; head.style.left=(centerX-80)+"px"; }
+    else { head.textContent = roundName(b.size / Math.pow(2, col.c)); head.style.left=(col.x+slotW/2-80)+"px"; }
     inner.appendChild(head);
+  });
 
-    list.forEach((s, i)=>{
+  // 槽位
+  cols.forEach(col=>{
+    if(col.side==='center'){
+      const d = document.createElement("div");
+      d.className = "b-champ";
+      d.style.left = (centerX-100)+"px"; d.style.top = (centerY-132)+"px";
+      d.innerHTML = '<div class="crown">👑</div><img src="'+COVERS[centerCol.champion.a]+'">' +
+        '<div class="t serif">'+centerCol.champion.t+'</div><div class="a">'+ALBUMS[centerCol.champion.a].name+' · '+ALBUMS[centerCol.champion.a].year+'</div>';
+      attachTip(d, centerCol.champion);
+      inner.appendChild(d);
+      return;
+    }
+    col.songs.forEach((s,j)=>{
       if(!s) return;
-      const y = yPos(c,i), x = xPos(c);
-      if(isChampCol){
-        const d = document.createElement("div");
-        d.className = "b-champ";
-        d.style.left = (x+10)+"px"; d.style.top = (y-132)+"px";
-        d.innerHTML = '<div class="crown">👑</div><img src="'+COVERS[s.a]+'">' +
-          '<div class="t serif">'+s.t+'</div><div class="a">'+ALBUMS[s.a].name+' · '+ALBUMS[s.a].year+'</div>';
-        attachTip(d, s);
-        inner.appendChild(d);
-      } else {
-        const loser = isLoser(c,i);
-        const d = document.createElement("div");
-        d.className = "b-slot" + (loser ? " loser" : " winner");
-        d.style.left = x+"px"; d.style.top = (y-26)+"px"; d.style.width = (BR.colW-14)+"px";
-        d.innerHTML = '<img src="'+COVERS[s.a]+'"><div class="tx">' +
-          '<div class="t">'+s.t+'</div><div class="a">'+ALBUMS[s.a].name+' · '+ALBUMS[s.a].year+'</div></div>' +
-          (loser ? "" : '<i class="dot"></i>');
-        attachTip(d, s);
-        inner.appendChild(d);
-      }
+      const loser = col.matches[j].winner && col.matches[j].winner!==s;
+      const d = document.createElement("div");
+      d.className = "b-slot" + (loser ? " loser" : " winner");
+      d.style.left = col.x+"px"; d.style.top = (col.y[j]-26)+"px"; d.style.width = slotW+"px";
+      d.innerHTML = '<img src="'+COVERS[s.a]+'"><div class="tx">'+
+        '<div class="t">'+s.t+'</div><div class="a">'+ALBUMS[s.a].name+' · '+ALBUMS[s.a].year+'</div></div>'+
+        (loser ? "" : '<i class="dot"></i>');
+      attachTip(d, s);
+      inner.appendChild(d);
     });
   });
 
@@ -756,6 +807,7 @@ function renderBracketView(){
   holder.appendChild(inner);
   show("bracket");
 }
+
 function exportBracket(){
   // 导出时用 Canvas 高清渲染（与页面 DOM 对阵图内容一致）
   bracketCanvas = drawBracket();

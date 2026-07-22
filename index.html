@@ -139,6 +139,10 @@
   }
   .bracket-head h2{font-size:26px;}
   #bracket-flow{padding:8px 28px 24px;}
+  .bracket-scroll{-webkit-overflow-scrolling:touch; margin:0 -28px; padding:0 28px;}
+  .bracket-scroll::-webkit-scrollbar{height:6px;}
+  .bracket-scroll::-webkit-scrollbar-thumb{background:var(--gold-soft); border-radius:3px;}
+  .bracket-scroll::-webkit-scrollbar-track{background:var(--cream2);}
   /* ---------- DOM 对阵图 ---------- */
   .bracket-inner{position:relative; transform-origin:0 0;}
   .b-title{position:absolute; top:24px; left:0; right:0; text-align:center; font-size:30px; font-weight:bold;}
@@ -758,65 +762,105 @@ function attachTip(el, song){
 }
 
 function renderBracketView(){
-  const size = G.size;
-  const T = Math.log2(size);
+  const b = buildBowl();
+  const { cols, W, H, leftCols, rightCols, centerCol, centerX, centerY, slotW } = b;
+
+  // 可滚动容器
+  const scrollWrap = document.createElement("div");
+  scrollWrap.className = "bracket-scroll";
+  scrollWrap.style.overflowX = "auto";
+  scrollWrap.style.overflowY = "hidden";
+
+  const inner = document.createElement("div");
+  inner.className = "bracket-inner";
+  inner.style.width = W+"px"; inner.style.height = H+"px";
+
+  let html = '<div class="b-title serif">🏆 The Beatles 歌曲世界杯 · 完整对阵图</div>' +
+    '<div class="b-sub">共 '+b.size+' 首参赛 · 冠军：'+G.champion.t+' · '+new Date().toLocaleDateString("zh-CN")+'</div>';
+
+  // SVG 连线
+  let paths = "";
+  function pairSVG(outer, inner, rev){
+    for(let j=0;j<inner.songs.length;j++){
+      const y=inner.y[j], y1=outer.y[2*j], y2=outer.y[2*j+1];
+      const xEnd = rev ? inner.x+slotW : inner.x;
+      const xStart = rev ? outer.x : outer.x+slotW;
+      const midX=(xStart+xEnd)/2;
+      paths += '<path d="M'+xStart+' '+y1+' L'+midX+' '+y1+' M'+xStart+' '+y2+' L'+midX+' '+y2+
+        ' M'+midX+' '+Math.min(y1,y2)+' L'+midX+' '+Math.max(y1,y2)+
+        ' M'+midX+' '+y+' L'+xEnd+' '+y+'" stroke="#d8cdb4" stroke-width="1.5" fill="none"/>';
+    }
+  }
+  for(let k=0;k<leftCols.length-1;k++) pairSVG(leftCols[k], leftCols[k+1], false);
+  for(let k=0;k<rightCols.length-1;k++) pairSVG(rightCols[k+1], rightCols[k], true);
+
+  const lastLeft = leftCols[leftCols.length-1];
+  const firstRight = rightCols[0];
+  const champL = centerX-100, champR = centerX+100;
+  function elbowSVG(x1,y1,x2,gold){
+    const midX=(x1+x2)/2;
+    paths += '<path d="M'+x1+' '+y1+' L'+midX+' '+y1+' L'+midX+' '+centerY+' L'+x2+' '+centerY+'" stroke="'+(gold?'#c9a227':'#cfc6b2')+'" stroke-width="'+(gold?'2':'1.2')+'" fill="none"/>';
+  }
+  lastLeft.songs.forEach((s,i)=> elbowSVG(lastLeft.x+slotW, lastLeft.y[i], champL, s===centerCol.finalists[0]));
+  firstRight.songs.forEach((s,i)=> elbowSVG(firstRight.x, firstRight.y[i], champR, s===centerCol.finalists[1]));
+
+  html += '<svg width="'+W+'" height="'+H+'" style="position:absolute;left:0;top:0;pointer-events:none;">'+paths+'</svg>';
+  inner.innerHTML = html;
+
+  // 列标题
+  cols.forEach(col=>{
+    const head = document.createElement("div");
+    head.className = "b-colhead serif";
+    if(col.side==='center'){ head.textContent="🏆 决赛"; head.style.left=(centerX-80)+"px"; }
+    else { head.textContent = roundName(b.size / Math.pow(2, col.c)); head.style.left=(col.x+slotW/2-80)+"px"; }
+    inner.appendChild(head);
+  });
+
+  // 槽位
+  cols.forEach(col=>{
+    if(col.side==='center'){
+      const d = document.createElement("div");
+      d.className = "b-champ";
+      d.style.left = (centerX-100)+"px"; d.style.top = (centerY-132)+"px";
+      d.innerHTML = '<div class="crown">👑</div><img src="'+COVERS[centerCol.champion.a]+'">' +
+        '<div class="t serif">'+centerCol.champion.t+'</div><div class="a">'+ALBUMS[centerCol.champion.a].name+' · '+ALBUMS[centerCol.champion.a].year+'</div>';
+      attachTip(d, centerCol.champion);
+      inner.appendChild(d);
+      return;
+    }
+    col.songs.forEach((s,j)=>{
+      if(!s) return;
+      const loser = col.matches[j].winner && col.matches[j].winner!==s;
+      const d = document.createElement("div");
+      d.className = "b-slot" + (loser ? " loser" : " winner");
+      d.style.left = col.x+"px"; d.style.top = (col.y[j]-26)+"px"; d.style.width = slotW+"px";
+      d.innerHTML = '<img src="'+COVERS[s.a]+'"><div class="tx">'+
+        '<div class="t">'+s.t+'</div><div class="a">'+ALBUMS[s.a].name+' · '+ALBUMS[s.a].year+'</div></div>'+
+        (loser ? "" : '<i class="dot"></i>');
+      attachTip(d, s);
+      inner.appendChild(d);
+    });
+  });
+
+  scrollWrap.appendChild(inner);
   const holder = $("bracket-flow");
   holder.innerHTML = "";
 
-  const head = document.createElement("div");
-  head.className = "bf-head";
-  head.innerHTML = '<h2 class="serif">🏆 完整对阵</h2><div class="bf-sub">共 '+size+' 首 · 冠军：'+G.champion.t+' · '+new Date().toLocaleDateString("zh-CN")+'</div>';
-  holder.appendChild(head);
-
-  const tabs = document.createElement("div");
-  tabs.className = "bracket-tabs";
-  const grid = document.createElement("div");
-  grid.className = "bf-grid";
-
-  function sideHTML(s, win, isFinal){
-    const badge = isFinal ? (win?'冠军':'亚军') : (win?'晋级':'淘汰');
-    return '<div class="bf-side '+(win?'win':'lose')+'"><img src="'+COVERS[s.a]+'"><div class="tx">'+
-      '<div class="t">'+s.t+'</div><div class="a">'+ALBUMS[s.a].name+' · '+ALBUMS[s.a].year+'</div></div>'+
-      '<span class="badge">'+badge+'</span></div>';
+  // 移动端：滑动手势提示 + 自动滚动到冠军
+  if(window.innerWidth < 820){
+    const hint = document.createElement("div");
+    hint.className = "scroll-hint";
+    hint.textContent = "← 左右滑动查看完整对阵 →";
+    hint.style.cssText = "text-align:center;font-size:11px;color:var(--ink-soft);padding:4px 0 8px;letter-spacing:1px;";
+    holder.appendChild(hint);
   }
-  function renderRound(r){
-    grid.innerHTML = "";
-    if(r>=T){
-      grid.innerHTML = '<div class="bf-champ-card"><div class="crown">👑</div><img src="'+COVERS[G.champion.a]+'">'+
-        '<div class="t serif">'+G.champion.t+'</div><div class="a">'+ALBUMS[G.champion.a].name+' · '+ALBUMS[G.champion.a].year+'</div></div>';
-      return;
-    }
-    const isFinal = r===T-1;
-    const R = G.rounds[r];
-    R.matches.forEach(m=>{
-      const card = document.createElement("div");
-      card.className = "bf-match";
-      card.innerHTML = sideHTML(m.a, m.winner===m.a, isFinal) + '<div class="bf-vs">VS</div>' + sideHTML(m.b, m.winner===m.b, isFinal);
-      grid.appendChild(card);
-    });
-  }
-  function selectTab(idx){
-    [...tabs.children].forEach((x,i)=>x.classList.toggle("active", i===idx));
-    renderRound(idx);
-  }
+  holder.appendChild(scrollWrap);
 
-  for(let r=0;r<T;r++){
-    const btn = document.createElement("button");
-    btn.textContent = roundName(G.rounds[r].n);
-    btn.addEventListener("click", ()=>selectTab(r));
-    tabs.appendChild(btn);
-  }
-  const cb = document.createElement("button");
-  cb.textContent = "🏆 冠军";
-  cb.addEventListener("click", ()=>selectTab(T));
-  tabs.appendChild(cb);
+  // 自动滚动到冠军位置
+  setTimeout(()=>{
+    scrollWrap.scrollLeft = centerX - scrollWrap.clientWidth/2;
+  }, 150);
 
-  holder.appendChild(tabs);
-  holder.appendChild(grid);
-  // 默认显示决赛轮（最精彩）
-  selectTab(T-1);
-  const activeBtn = tabs.children[T-1];
-  if(activeBtn && activeBtn.scrollIntoView) activeBtn.scrollIntoView({inline:"center", block:"nearest"});
   show("bracket");
 }
 
